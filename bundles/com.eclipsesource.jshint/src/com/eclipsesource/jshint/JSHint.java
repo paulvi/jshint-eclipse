@@ -15,9 +15,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
 
 import org.mozilla.javascript.Context;
+import org.mozilla.javascript.EcmaError;
 import org.mozilla.javascript.Function;
 import org.mozilla.javascript.JavaScriptException;
 import org.mozilla.javascript.NativeArray;
@@ -47,7 +49,7 @@ import com.eclipsesource.json.JsonValue;
  */
 public class JSHint {
 
-  private static final String DEFAULT_JSHINT_VERSION = "2.5.6";
+  private static final String DEFAULT_JSHINT_VERSION = "2.9.0";
   private static final int DEFAULT_JSHINT_INDENT = 4;
   private ScriptableObject scope;
   private Function jshint;
@@ -175,16 +177,37 @@ public class JSHint {
   }
 
   private void load( Reader reader ) throws IOException {
+    char[] buf = new char[2048];
+    StringWriter writer = new StringWriter();
+    int count;
+    while((count = reader.read(buf, 0, buf.length)) > 0)
+      writer.write(buf, 0, count);
+    String code = writer.toString();
+
+    try {
+      try {
+        load(code, false);
+      } catch(EcmaError exception ) {
+        if(!exception.getMessage().startsWith("ReferenceError: \"window\"")) {
+          throw exception;
+        }
+        // Use old style, window instead of global
+        load(code, true);
+      }
+    } catch( RhinoException exception ) {
+      throw new IllegalArgumentException( "Could not evaluate JavaScript input", exception );
+    }
+  }
+
+  private void load( String code, boolean oldShim ) throws IOException {
     Context context = Context.enter();
     try {
       context.setOptimizationLevel( 9 );
       context.setLanguageVersion( Context.VERSION_1_5 );
       scope = context.initStandardObjects();
-      context.evaluateString( scope, createShimCode(), "shim", 1, null );
-      context.evaluateReader( scope, reader, "jshint library", 1, null );
+      context.evaluateString( scope, createShimCode(oldShim), "shim", 1, null );
+      context.evaluateString( scope, code, "jshint library", 1, null );
       jshint = findJSHintFunction( scope );
-    } catch( RhinoException exception ) {
-      throw new IllegalArgumentException( "Could not evaluate JavaScript input", exception );
     } finally {
       Context.exit();
     }
@@ -255,11 +278,17 @@ public class JSHint {
     return charIndex;
   }
 
-  private static String createShimCode() {
-    // Create shims to prevent problems with JSHint accessing objects that are not available in
-    // Rhino, e.g. https://github.com/jshint/jshint/issues/1038
-    return "console = {log:function(){},error:function(){},trace:function(){}};"
-         + "window = {};";
+  private static String createShimCode(boolean oldShim) {
+    // Create shims to prevent problems with JSHint accessing objects that
+    // are not available in
+    if(oldShim) {
+      // Rhino, e.g. https://github.com/jshint/jshint/issues/1038
+      return "console = {log:function(){},error:function(){},trace:function(){}};"
+           + "window = {};";
+    }
+
+    // More recent Rhino, e.g. https://github.com/jshint/jshint/issues/2308
+    return "global = this;";
   }
 
   private static Function findJSHintFunction( ScriptableObject scope )
