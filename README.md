@@ -20,7 +20,8 @@ for details on features and usage. ([Published on Eclipse Marketplace](<http://m
 Requirements
 ------------
 
-Eclipse 3.6 (Helios) or newer.
+Eclipse 4.5 (Mars) or newer since plugin version 0.10,
+Eclipse 3.6 (Helios) before.
 
 JSHint included
 ---------------
